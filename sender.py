@@ -1,103 +1,95 @@
+import os
 import asyncio
-import random
+from aiohttp import web
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from playwright.async_api import async_playwright
 
-# ⚠️ استبدل النص التالي بالتوكن اللي نسخته من BotFather
-TELEGRAM_TOKEN = "ضع_التوكن_هنا"
+# احصل على التوكن من متغيرات البيئة أو ضعه هنا مباشرة
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
 
-def generate_name_variations(names_list, count):
-    """توليد أسماء مختلفة بناءً على الأسماء الثلاثة المدخلة"""
-    generated = []
-    for i in range(count):
-        shuffled = names_list.copy()
-        random.shuffle(shuffled)
-        base_name = " ".join(shuffled)
-        final_name = f"{base_name} {i+1}"
-        generated.append(final_name)
-    return generated
+# --- 1. سيرفر الويب الخفيف لإرضاء منصة Render ومنح الخطة المجانية ---
+async def handle_ping(request):
+    return web.Response(text="Kahoot Bot is active and running!")
 
-async def launch_kahoot_bot(page, pin, name):
-    """تسجيل دخول البوت عبر Playwright بسرعة فائقة"""
-    try:
-        await page.goto("https://kahoot.it/", wait_until="domcontentloaded")
-        
-        # إدخال ה-PIN
-        await page.fill('input[name="gameId"]', str(pin))
-        await page.click('button[type="submit"]')
-        
-        # انتظار حقل الاسم والإدخال
-        await page.wait_for_selector('input[name="nickname"]', timeout=8000)
-        await page.fill('input[name="nickname"]', name)
-        await page.click('button[type="submit"]')
-        
-        print(f"[+] تم دخول הבוט بنجاح: {name}")
-    except Exception as e:
-        print(f"[!] خطأ أثناء دخول הבוט {name}: {e}")
+async def start_dummy_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Dummy web server running on port {port}")
 
-async def start_kahoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    أمر التلغرام:
-    /k [PIN] [العدد] [اسم1] [اسم2] [اسم3]
-    مثال: /k 822781 5 احمد توفيق عياش
-    """
-    args = context.args
-    if len(args) < 5:
-        await update.message.reply_text(
-            "❌ استخدام خاطئ للأمر!\n"
-            "الصيغة الصحيحة:\n"
-            "`/k [PIN] [العدد] [اسم1] [اسم2] [اسم3]`\n\n"
-            "مثال:\n`/k 822781 5 احمد توفيق عياش`",
-            parse_mode="Markdown"
-        )
-        return
-
-    pin = args[0]
-    try:
-        bot_count = int(args[1])
-    except ValueError:
-        await update.message.reply_text("❌ عدد البوتات يجب أن يكون رقماً.")
-        return
-
-    input_names = args[2:5]
-    generated_names = generate_name_variations(input_names, bot_count)
-
-    await update.message.reply_text(
-        f"🚀 جاري تشغيل {bot_count} بوتات بسرعة فائقة...\n"
-        f"📌 اللعبة: {pin}\n"
-        f"👤 الأسماء: {', '.join(generated_names[:3])}..."
-    )
-
+# --- 2. وظائف بوت كاهوت و Playwright ---
+async def start_kahoot_bot(game_pin: str, nickname: str):
+    """دالة لتشغيل متصفح خفي والدخول إلى لعبة كاهوت تلقائياً"""
     async with async_playwright() as p:
-        # تشغيل متصفح خفي (Headless)
-        browser = await p.chromium.launch(headless=True)
-        tasks = []
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        page = await browser.new_page()
         
-        for name in generated_names:
-            context_page = await browser.new_context()
-            page = await context_page.new_page()
+        try:
+            print(f"Navigating to Kahoot with PIN: {game_pin}")
+            await page.goto("https://kahoot.it/")
             
-            task = asyncio.create_task(launch_kahoot_bot(page, pin, name))
-            tasks.append(task)
+            # كتابة رقم الـ PIN
+            await page.fill("#game-input", game_pin)
+            await page.click("button[type='submit']")
             
-            # فاصل 1.5 ثانية لمنع الحظر
-            await asyncio.sleep(1.5)
+            # انتظار واختيار اسم المستخدم (Nickname)
+            await page.wait_for_selector("#nickname", timeout=10000)
+            await page.fill("#nickname", nickname)
+            await page.click("button[type='submit']")
+            
+            print(f"Successfully joined Kahoot as {nickname}!")
+            
+            # البقاء داخل اللعبة
+            while True:
+                await asyncio.sleep(60)
+                
+        except Exception as e:
+            print(f"Error in Kahoot automation: {e}")
+        finally:
+            await browser.close()
 
-        await asyncio.gather(*tasks)
-        await update.message.reply_text("✅ تم إدخال جميع البوتات بنجاح إلى اللعبة!")
-        
-        # إبقاء المتصفح شغالاً لمدة 15 دقيقة أثناء اللعبة
-        await asyncio.sleep(900) 
-        await browser.close()
-
+# --- 3. أوامر التلغرام ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 البوت شغال ومستعد! أرسل الأمر:\n`/k [PIN] [العدد] [اسم1] [اسم2] [اسم3]`")
+    await update.message.reply_text("أهلاً بك! بوت كاهوت جاهز. استخدم الأمر /join PIN NICKNAME للدخول.")
+
+async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("الرجاء إدخال الرمز والاسم هكذا: /join <PIN> <Name>")
+        return
+    
+    game_pin = args[0]
+    nickname = args[1]
+    
+    await update.message.reply_text(f"جاري الانضمام إلى لعبة كاهوت برمز {game_pin} باسم {nickname}...")
+    asyncio.create_task(start_kahoot_bot(game_pin, nickname))
+
+# --- 4. الدالة الرئيسية لتشغيل السيرفر والبوت معاً ---
+async def main():
+    # تشغيل سيرفر الويب في الخلفية من أجل Render
+    asyncio.create_task(start_dummy_server())
+    
+    # إعداد بوت التلغرام
+    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("join", join_command))
+    
+    print("Telegram bot is starting...")
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    
+    stop_event = asyncio.Event()
+    await stop_event.wait()
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("k", start_kahoot))
-    
-    print("🤖 بوت التلغرام شغال ومستعد لاستقبال الأوامر...")
-    app.run_polling()
+    asyncio.run(main())
