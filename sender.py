@@ -5,11 +5,12 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from playwright.async_api import async_playwright
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
+# التوكن الخاص ببوت التلغرام
+TELEGRAM_TOKEN = "8787978619:AAG0KWUdrU5PXgfcKGoD1lZD1Vi6Ltq709E"
 
-# --- سيرفر الويب الخفيف للحفاظ على الخطة المجانية على Render ---
+# --- سيرفر الويب للحفاظ على الخطة المجانية على Render ---
 async def handle_ping(request):
-    return web.Response(text="Kahoot Super-Bot is active!")
+    return web.Response(text="Kahoot Blast-Bot is active!")
 
 async def start_dummy_server():
     app = web.Application()
@@ -20,10 +21,9 @@ async def start_dummy_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-# --- دالة كاهوت فائقة السرعة ---
-async def start_kahoot_bot(game_pin: str, nickname: str):
+# --- دالة دخول بوت واحد بسرعة البرق ---
+async def launch_single_bot(game_pin: str, nickname: str):
     async with async_playwright() as p:
-        # تشغيل المتصفح مع تحسينات أداء صارمة لزيادة السرعة
         browser = await p.chromium.launch(
             headless=True,
             args=[
@@ -34,51 +34,68 @@ async def start_kahoot_bot(game_pin: str, nickname: str):
                 "--disable-gpu"
             ]
         )
-        
-        # إنشاء سياق صفحة مع تعطيل الصور والملفات غير الضرورية لتسريع التحميل بشكل جنوني
         context = await browser.new_context()
         page = await context.new_page()
         
         try:
-            # الدخول الفوري بدون انتظار تحميل الصور والإعلانات
+            # الدخول الفوري بدون انتظار الصور
             await page.goto("https://kahoot.it/", wait_until="domcontentloaded")
             
-            # كتابة الـ PIN فور ظهور الحقل بأسرع وقت
+            # كتابة الـ PIN والضغط Enter
             await page.wait_for_selector("#game-input", timeout=5000)
             await page.fill("#game-input", game_pin)
             await page.press("#game-input", "Enter")
             
-            # تخطي شاشة الاسم والضغط فوراً
+            # كتابة الاسم والضغط Enter
             await page.wait_for_selector("#nickname", timeout=5000)
             await page.fill("#nickname", nickname)
             await page.press("#nickname", "Enter")
             
-            print(f"Lightning fast! Joined Kahoot as {nickname}")
+            print(f"Blasted into Kahoot as: {nickname}")
             
-            # البقاء متصلاً باللعبة
+            # البقاء داخل اللعبة
             while True:
                 await asyncio.sleep(60)
                 
         except Exception as e:
-            print(f"Speed bot error: {e}")
+            print(f"Error for {nickname}: {e}")
         finally:
             await browser.close()
 
 # --- أوامر التلغرام ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⚡ بوت كاهوت الخارق جاهز! استخدم الأمر:\n/join <PIN> <الاسم>")
+    await update.message.reply_text(
+        "🔥 بوت تفجير الكاهوت جاهز وبأقصى سرعة!\n"
+        "استخدم الأمر برسالة واحدة هكذا:\n"
+        "/blast <PIN> <العدد> <الأسماء>\n"
+        "مثال:\n"
+        "/blast 123456 15 أحمد توفيق"
+    )
 
-async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("الرجاء إدخال الرمز والاسم هكذا: /join <PIN> <Name>")
+async def blast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    parts = text.split(" ")
+    
+    if len(parts) < 4:
+        await update.message.reply_text("❌ الصيغة غلط! اكتب بالشكل التالي:\n/blast <PIN> <العدد> <الأسماء>\nمثال: /blast 123456 10 أحمد توفيق")
         return
     
-    game_pin = args[0]
-    nickname = args[1]
+    game_pin = parts[1]
+    try:
+        count = int(parts[2])
+    except ValueError:
+        await update.message.reply_text("❌ العدد لازم يكون رقم صحيح (مثلاً 10 أو 30).")
+        return
+        
+    base_name = " ".join(parts[3:])
     
-    await update.message.reply_text(f"🚀 جاري الانضمام بسرعة البرق إلى الكاهوت برمز {game_pin}...")
-    asyncio.create_task(start_kahoot_bot(game_pin, nickname))
+    await update.message.reply_text(f"🚀 جاري تفجير الكاهوت برمز {game_pin} وإطلاق {count} بوتات بسرعة فائقة جداً للوصول للبونوس!")
+
+    # إطلاق البوتات بفارق زمني بسيط جداً (0.5 ثانية) لتدخل وراء بعضها كالصاروخ
+    for i in range(1, count + 1):
+        nickname = f"{base_name} {i}"
+        asyncio.create_task(launch_single_bot(game_pin, nickname))
+        await asyncio.sleep(0.5)
 
 # --- التشغيل الأساسي ---
 async def main():
@@ -86,7 +103,7 @@ async def main():
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("join", join_command))
+    application.add_handler(CommandHandler("blast", blast_command))
     
     await application.initialize()
     await application.start()
