@@ -11,10 +11,10 @@ from telegram.ext import (
 )
 from playwright.async_api import async_playwright
 
-TELEGRAM_TOKEN = "8787978619:AAG0KWUdrU5PXgfcKGoD1lZD1Vi6Ltq709E"
+TELEGRAM_TOKEN = "8787978619:AAFpPzAvn48302GQLRtj3ki1tvPh4dWL2Ro"
 
-# حالات المحادثة بالترتيب
-PIN_COUNT, NAMES = range(2)
+# حالات المحادثة بالترتيب الجديد: الأسماء أولاً، ثم الـ PIN والعدد
+NAMES, PIN_COUNT = range(2)
 
 def generate_name_variations(names_list, count):
     generated = []
@@ -39,12 +39,26 @@ async def launch_kahoot_bot(page, pin, name):
     except Exception as e:
         print(f"[!] خطأ مع {name}: {e}")
 
-# البدء بأمر /k
+# البدء بأمر /k وسؤال المستخدم عن الأسماء أولاً
 async def start_kahoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📌 أهلاً بك! أرسل لي الآن **رقم اللعبة (PIN)** و **عدد البوتات** مفصولين بمسافة (مثال: `822781 5`)", parse_mode="Markdown")
+    await update.message.reply_text("👤 أهلاً بك! أرسل لي أولاً **3 أسماء** مفصولة بمسافات (مثال: `احمد توفيق عياش`):", parse_mode="Markdown")
+    return NAMES
+
+# الخطوة الأولى: استقبال الأسماء وحفظها
+async def receive_names(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    names = text.split()
+
+    if len(names) < 3:
+        await update.message.reply_text("❌ الرجاء إرسال 3 أسماء على الأقل مفصولة بمسافات:")
+        return NAMES
+
+    context.user_data['input_names'] = names[:3]
+
+    await update.message.reply_text("📌 ممتاز! الآن أرسل **رقم اللعبة (PIN)** و **عدد البوتات** مفصولين بمسافة (مثال: `822781 5`)", parse_mode="Markdown")
     return PIN_COUNT
 
-# الخطوة الأولى: استقبال الـ PIN والعدد
+# الخطوة الثانية: استقبال الـ PIN والعدد وتشغيل البوتات
 async def receive_pin_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     parts = text.split()
@@ -60,26 +74,7 @@ async def receive_pin_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ عدد البوتات يجب أن يكون رقماً صحيحاً. حاول مجدداً:")
         return PIN_COUNT
 
-    # حفظهم مؤقتاً
-    context.user_data['pin'] = pin
-    context.user_data['bot_count'] = bot_count
-
-    await update.message.reply_text("👤 ممتاز! الآن أرسل **3 أسماء** مفصولة بمسافات (مثال: `احمد توفيق عياش`)")
-    return NAMES
-
-# الخطوة الثانية: استقبال الأسماء وتشغيل البوتات
-async def receive_names(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    names = text.split()
-
-    if len(names) < 3:
-        await update.message.reply_text("❌ الرجاء إرسال 3 أسماء على الأقل مفصولة بمسافات:")
-        return NAMES
-
-    pin = context.user_data.get('pin')
-    bot_count = context.user_data.get('bot_count')
-    input_names = names[:3]
-
+    input_names = context.user_data.get('input_names')
     generated_names = generate_name_variations(input_names, bot_count)
 
     await update.message.reply_text(
@@ -116,12 +111,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # استخدام ConversationHandler عشان يسألك بالترتيب وبدون لخبطة
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("k", start_kahoot)],
         states={
-            PIN_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pin_count)],
             NAMES: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_names)],
+            PIN_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pin_count)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
